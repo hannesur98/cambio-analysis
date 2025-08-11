@@ -1,0 +1,80 @@
+# pyproject.toml
+
+[build-system]
+requires = ["setuptools>=65.6.3", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cambio"
+requires-python = ">=3.8"
+description = "Analyize CAMBIO data"
+readme = "README.md"
+authors = [
+    {name = "Peter Robinson", email="peter.robinson@bih-charite.de"},
+    {name = "Hannes Urbat", email="hannes.urbat@me.com"},
+]
+license = { file = "LICENSE" }
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+]
+keywords = [
+    "Global Alliance for Genomics and Health",
+    "GA4GH Phenopacket Schema",
+    "Human Phenotype Ontology",
+    "GA4GH",
+    "HPO"]
+
+# version in __init__
+dynamic = ["version"]
+
+dependencies = [
+    "hpo-toolkit>=0.5.0,<0.6.0",
+    "matplotlib>=3.2.0,<4.0",
+    "pandas[excel]>=2.0.0,<3.0.0",  # We want to parse Excel files.
+    "phenopackets>=2.0.2",
+    "protobuf>=3.15.0,<4.0.0",
+    "scipy",
+    "numpy"
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7.0.0,<8.0.0"]
+
+
+[project.urls]
+homepage = "https://github.com/hannesur98/cambio-analysis"
+repository = "https://github.com/hannesur98/cambio-analysis.git"
+documentation = "https://github.com/hannesur98/cambio-analysis"
+bugtracker = "https://github.com/hannesur98/cambio-analysis/issues"
+
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+zip-safe = false
+
+[tool.setuptools.dynamic]
+version = { attr = "cambio.__version__" }
+
+
+# See MANIFEST.in for the list of the data files
+# being included in the package.
+
+
+[tool.yapf]
+blank_line_before_nested_class_or_def = true
+column_limit = 88
+
+[tool.pylint]
+max-line-length = 88
+disable = [
+    "C0103", # (invalid-name)
+    "C0114", # (missing-module-docstring)
+    "C0115", # (missing-class-docstring)
+    "C0116", # (missing-function-docstring)
+    "R0903", # (too-few-public-methods)
+    "R0913", # (too-many-arguments)
+    "W0105", # (pointless-string-statement)
+]
