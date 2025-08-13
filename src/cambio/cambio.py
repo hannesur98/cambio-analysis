@@ -179,4 +179,5 @@ class Cambio:
 
         return {'column': value_col, 't_stat': t_stat, 'p_val': p_val, 'diag': diag}
 
-           
+    def get_df(self) -> pd.DataFrame:
+        return self._df_clean
