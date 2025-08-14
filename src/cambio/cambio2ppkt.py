@@ -10,6 +10,39 @@ import pandas as pd
 import phenopackets as PPKt
 from collections import defaultdict
 from scipy import stats
+from google.protobuf.json_format import ParseDict
+
+GENO_ZYGOSITY_MAP = {
+    "hom_ref": {"id": "GENO:0000134", "label": "homozygous reference"},
+    "het":     {"id": "GENO:0000135", "label": "heterozygous"},
+    "hom_alt": {"id": "GENO:0000136", "label": "homozygous"},
+}
+
+def _clean_genotype_call(val):
+    if pd.isna(val):
+        return np.nan
+    s = str(val).upper().strip().replace("|","/").replace(" ", "")
+    s = re.sub(r"\(.*?\)", "", s)
+    repl = {
+        "UNDETERMINED": "",
+        "C/UNDETERMINED": "C",
+        "T/UNDETERMINED": "T",
+        "TC/UNDETERMINED": "TC",
+        "T?": "T",
+    }
+    s = repl.get(s, s)
+    return s or np.nan
+
+def _zygosity_from_call(call):
+    if pd.isna(call):
+        return None
+    if call in ("CC","C","C/C"):
+        return GENO_ZYGOSITY_MAP["hom_alt"]
+    if call in ("TT","T","T/T"):
+        return GENO_ZYGOSITY_MAP["hom_ref"]
+    if call in ("CT","TC","C/T","T/C"):
+        return GENO_ZYGOSITY_MAP["het"]
+    return None
 
 # Regular expression to identify numbers
 NUMERIC_RE = re.compile(r'^[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?$')
@@ -479,3 +512,109 @@ class Cambio2Phenopacket:
                     pass
                 else:
                     raise ValueError(f"Unrecognized error in HPO-type column '{cell_contents}'")
+                
+
+
+    def add_cfh_rs1061170_interpretation(self, assay_col: str = "C___8355565_10") -> None:
+        """
+        Für jede Zeile in self._df:
+        - liest den Genotyp aus assay_col (C___8355565_10)
+        - fügt im Phenopacket (get_ppkt_d()) einen Interpretation-Block hinzu **nur wenn** ein valider Genotyp vorliegt:
+            progressStatus = SOLVED
+            interpretationStatus = CONTRIB​UTORY
+            variationDescriptor:
+                expressions: dbSNP rs1061170
+                geneContext: NCBIGene:3075 / CFH
+                allelicState gemäß Genotyp
+        Hinweis: Für fehlende/unklare Genotypen wird **kein** Interpretationseintrag erzeugt (Parser-sicher).
+        """
+        # kleine Normalisierungshilfe (wie zuvor genutzt)
+        def _clean_call(val):
+            import re, numpy as np, pandas as pd
+            if pd.isna(val):
+                return np.nan
+            s = str(val).upper().strip().replace("|", "/").replace(" ", "")
+            s = re.sub(r"\(.*?\)", "", s)
+            # typische Sonderfälle mappen
+            if s in ("UNDETERMINED", ""):
+                return np.nan
+            if s in ("C/UNDETERMINED",):
+                return "C"
+            if s in ("T/UNDETERMINED",):
+                return "T"
+            if s in ("TC/UNDETERMINED",):
+                return "TC"
+            if s in ("C/T",):
+                return "CT"
+            if s in ("T/C",):
+                return "CT"
+            return s
+
+        for _, row in self._df.iterrows():
+            # eine Zeile pro Patient auswählen (wie in deinen anderen Methoden)
+            eye = str(row.get("Eye", "")).strip()
+            if eye not in ("", "L", "Both", "B"):
+                continue
+
+            # Patienten-ID bestimmen (wie bisher bei dir üblich)
+            pid = str(row.get("Alias", row.iloc[0]))
+            ppkt = self.get_ppkt_d().get(pid)
+            if ppkt is None:
+                raise ValueError(f"Could not retrieve phenopacket for id={pid}")
+
+            raw = row.get(assay_col)
+            call = _clean_call(raw)
+
+            # Nur bei eindeutigem Genotyp weitermachen
+            if isinstance(call, float) and np.isnan(call):
+                continue
+
+            allelic_state = None
+            if call in ("C", "CC"):
+                # homozygous risk
+                allelic_state = {"id": "GENO:0000136", "label": "homozygous"}
+            elif call in ("CT", "TC"):
+                # heterozygous risk
+                allelic_state = {"id": "GENO:0000135", "label": "heterozygous"}
+            elif call in ("T", "TT"):
+                # homozygous normal/reference
+                allelic_state = {"id": "GENO:0000134", "label": "homozygous reference"}
+            else:
+                # unklarer Wert → keinen Interpretationseintrag anlegen
+                continue
+
+            # Interpretation-Block nach Zielstruktur (Enum-konform)
+            interp_dict = {
+                "id": f"cfh-rs1061170-{pid}",
+                "progressStatus": "SOLVED",
+                "diagnosis": {
+                    "disease": {"id": "NCBIGene:3075", "label": "CFH"},
+                    "genomicInterpretations": [
+                        {
+                            "subjectOrBiosampleId": pid,
+                            "interpretationStatus": "CONTRIBUTORY",
+                            "variantInterpretation": {
+                                "variationDescriptor": {
+                                    "expressions": [{"syntax": "dbSNP", "value": "rs1061170"}],
+                                    "geneContext": {"id": "NCBIGene:3075", "symbol": "CFH"},
+                                    "allelicState": allelic_state,
+                                    "extensions": [
+                                        {"name": "assay_id", "value": assay_col},
+                                        {"name": "observed_call_raw", "value": str(raw)},
+                                    ]
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+
+            # Protobuf erzeugen & anhängen
+            try:
+                new_interp = PPKt.Interpretation()
+                ParseDict(interp_dict, new_interp, ignore_unknown_fields=True)
+                if getattr(ppkt, "interpretations", None) is None:
+                    ppkt.interpretations = []
+                ppkt.interpretations.append(new_interp)
+            except Exception as e:
+                print(f"Could not append rs1061170 interpretation for {pid}: {e}")
